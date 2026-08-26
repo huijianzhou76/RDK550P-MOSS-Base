@@ -1,0 +1,47 @@
+menu "MOSS MCU Hardware"
+
+config MOSS_UART_TX_GPIO
+    int "RDK link UART TX GPIO"
+    default 17
+
+config MOSS_UART_RX_GPIO
+    int "RDK link UART RX GPIO"
+    default 18
+
+config MOSS_YAW_SERVO_GPIO
+    int "Yaw servo signal GPIO"
+    default 13
+
+config MOSS_PITCH_SERVO_GPIO
+    int "Pitch servo signal GPIO"
+    default 14
+
+config MOSS_STATUS_LED_GPIO
+    int "Status LED GPIO"
+    default 48
+
+config MOSS_YAW_MIN_DEG
+    int "Yaw minimum safe angle"
+    default -70
+
+config MOSS_YAW_MAX_DEG
+    int "Yaw maximum safe angle"
+    default 70
+
+config MOSS_PITCH_MIN_DEG
+    int "Pitch minimum safe angle"
+    default -25
+
+config MOSS_PITCH_MAX_DEG
+    int "Pitch maximum safe angle"
+    default 35
+
+config MOSS_WATCHDOG_WARN_MS
+    int "Stop accepting motion after no heartbeat (ms)"
+    default 5000
+
+config MOSS_WATCHDOG_ESTOP_MS
+    int "Enter motion-safe state after no heartbeat (ms)"
+    default 10000
+
+endmenu
