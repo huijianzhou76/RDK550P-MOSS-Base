@@ -10,7 +10,7 @@
 namespace {
 const char *TAG = "MOSS_IR";
 constexpr uint32_t RMT_RESOLUTION_HZ = 1000000;  // 1 tick = 1 us
-constexpr uint32_t IR_CARRIER_HZ = 38000;
+constexpr unsigned IR_CARRIER_HZ = 38000U;
 }
 
 bool IrService::init(int rx_gpio, int tx_gpio) {
@@ -100,9 +100,10 @@ bool IrService::learn(const std::string &slot_name, int timeout_ms, size_t *symb
         ESP_LOGW(TAG, "IR learn timeout for slot %s", slot_name.c_str());
         return false;
     }
-    if (rx_count_ == 0) return false;
+    const size_t received_count = static_cast<size_t>(rx_count_);
+    if (received_count == 0) return false;
 
-    slot->count = std::min<size_t>(rx_count_, MAX_SYMBOLS);
+    slot->count = std::min(received_count, MAX_SYMBOLS);
     // Typical 38kHz demodulating receivers output LOW while a carrier burst is
     // present. RMT TX carrier is applied to HIGH levels, so invert the learned
     // levels while preserving durations.
