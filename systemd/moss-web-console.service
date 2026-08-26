@@ -12,7 +12,7 @@ RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=MOSS_MODE=rdk
 Environment=MOSS_HARDWARE_BACKEND=direct-rdk
-Environment=MOSS_MCU_PORT=/dev/ttyACM0
+Environment=MOSS_MCU_PORT=auto
 Environment=MOSS_MCU_BAUD=115200
 Environment=HOST=0.0.0.0
 Environment=PORT=5500
