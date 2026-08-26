@@ -10,6 +10,7 @@ namespace {
 constexpr uint32_t SERVO_PERIOD_US = 20000;
 constexpr uint32_t SERVO_CENTER_US = 1500;
 constexpr uint32_t SERVO_RANGE_US = 500;
+constexpr uint32_t SERVO_DUTY_BITS = 14;
 constexpr float PI_F = 3.14159265358979323846f;
 constexpr int MOTION_TICK_MS = 20;
 constexpr int QUEUE_DEPTH = 8;
@@ -17,7 +18,7 @@ const char *TAG = "MOSS_MOTION";
 }
 
 uint32_t MotionController::pulse_to_duty(uint32_t pulse_us) {
-    constexpr uint32_t max_duty = (1u << 16) - 1;
+    constexpr uint32_t max_duty = (1u << SERVO_DUTY_BITS) - 1;
     return static_cast<uint32_t>((static_cast<uint64_t>(pulse_us) * max_duty) / SERVO_PERIOD_US);
 }
 
@@ -29,7 +30,9 @@ uint32_t MotionController::angle_to_pulse(float angle_deg) {
 bool MotionController::init(int yaw_gpio, int pitch_gpio) {
     ledc_timer_config_t timer = {};
     timer.speed_mode = LEDC_LOW_SPEED_MODE;
-    timer.duty_resolution = LEDC_TIMER_16_BIT;
+    // ESP32-S3 exposes up to LEDC_TIMER_14_BIT in ESP-IDF 5.4.
+    // 14-bit at 50Hz still provides far more than enough servo pulse resolution.
+    timer.duty_resolution = LEDC_TIMER_14_BIT;
     timer.timer_num = LEDC_TIMER_0;
     timer.freq_hz = 50;
     timer.clk_cfg = LEDC_AUTO_CLK;
