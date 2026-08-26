@@ -16,8 +16,12 @@ config MOSS_PITCH_SERVO_GPIO
     int "Pitch servo signal GPIO"
     default 14
 
+config MOSS_SERVO_POWER_EN_GPIO
+    int "Servo power switch enable GPIO"
+    default 12
+
 config MOSS_ESTOP_GPIO
-    int "Physical E-STOP GPIO (active low)"
+    int "Physical E-STOP sense GPIO (fail-safe active low)"
     default 4
 
 config MOSS_STATUS_LED_GPIO
@@ -65,7 +69,7 @@ config MOSS_WATCHDOG_WARN_MS
     default 5000
 
 config MOSS_WATCHDOG_ESTOP_MS
-    int "Disable motion output after no RDK heartbeat (ms)"
+    int "Cut servo power after no RDK heartbeat (ms)"
     default 10000
 
 endmenu
