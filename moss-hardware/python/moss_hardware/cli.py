@@ -25,8 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("ping")
     sub.add_parser("status")
+    sub.add_parser("capabilities")
+    sub.add_parser("sensors")
     sub.add_parser("center")
     sub.add_parser("estop")
+    sub.add_parser("ir-list")
 
     clear = sub.add_parser("estop-clear")
     clear.add_argument("--confirm", action="store_true", required=True)
@@ -42,6 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     display = sub.add_parser("display")
     display.add_argument("text")
 
+    learn = sub.add_parser("ir-learn")
+    learn.add_argument("slot")
+    learn.add_argument("--timeout-ms", type=int, default=4000)
+
+    send = sub.add_parser("ir-send")
+    send.add_argument("slot")
+    send.add_argument("--repeat", type=int, default=1)
+
     return parser
 
 
@@ -53,6 +64,10 @@ def main() -> int:
             result = gateway.ping()
         elif args.command == "status":
             result = gateway.status()
+        elif args.command == "capabilities":
+            result = gateway.capabilities()
+        elif args.command == "sensors":
+            result = gateway.read_sensors()
         elif args.command == "center":
             result = gateway.center_head()
         elif args.command == "estop":
@@ -60,15 +75,17 @@ def main() -> int:
         elif args.command == "estop-clear":
             result = gateway.clear_emergency_stop(args.confirm)
         elif args.command == "move":
-            result = gateway.move_head(
-                yaw_deg=args.yaw,
-                pitch_deg=args.pitch,
-                speed=args.speed,
-            )
+            result = gateway.move_head(yaw_deg=args.yaw, pitch_deg=args.pitch, speed=args.speed)
         elif args.command == "light":
             result = gateway.set_light(brightness=args.brightness)
         elif args.command == "display":
             result = gateway.display_text(args.text)
+        elif args.command == "ir-list":
+            result = gateway.ir_list()
+        elif args.command == "ir-learn":
+            result = gateway.ir_learn(args.slot, args.timeout_ms)
+        elif args.command == "ir-send":
+            result = gateway.ir_send(args.slot, args.repeat)
         else:  # pragma: no cover
             raise RuntimeError("unknown command")
         print_response(result)
