@@ -76,6 +76,20 @@ jobs:
         shell: bash
         working-directory: moss-mcu/esp32
         run: |
-          source /opt/esp/idf/export.sh
-          idf.py set-target esp32s3
-          idf.py build
+          set +e
+          source /opt/esp/idf/export.sh >/dev/null 2>&1
+          idf.py set-target esp32s3 >/tmp/idf-target.log 2>&1
+          target_rc=$?
+          if [ "$target_rc" -ne 0 ]; then
+            cat /tmp/idf-target.log
+            exit "$target_rc"
+          fi
+          idf.py build >/tmp/idf-build.log 2>&1
+          build_rc=$?
+          if [ "$build_rc" -ne 0 ]; then
+            echo "===== ESP-IDF COMPILER ERROR SUMMARY ====="
+            grep -E -B 3 -A 8 '(^|[[:space:]])(fatal error:|error:)|FAILED:|ninja: build stopped' /tmp/idf-build.log | tail -n 180 || true
+            echo "===== END ERROR SUMMARY ====="
+            exit "$build_rc"
+          fi
+          tail -n 30 /tmp/idf-build.log
