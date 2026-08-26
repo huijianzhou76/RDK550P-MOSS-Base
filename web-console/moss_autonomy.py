@@ -219,9 +219,19 @@ class AutonomyEngine:
         on_stage: Callable[[str, int, dict[str, Any]], Awaitable[None]],
     ) -> dict[str, Any]:
         mission_id = mission["id"]
-        analysis = await self.analyze(mission)
-        risk = analysis["risk"]
-        plan = analysis["plan"]
+        risk = mission.get("risk")
+        plan = mission.get("plan")
+        if not isinstance(risk, dict) or not isinstance(plan, list) or not plan:
+            analysis = await self.analyze(mission)
+            risk = analysis["risk"]
+            plan = analysis["plan"]
+        else:
+            await self.evidence.append(
+                mission_id,
+                "mission.execution_started",
+                {"risk": risk, "plan_steps": [step.get("id") for step in plan]},
+                actor="moss-core",
+            )
 
         if risk["approval_required"] and not mission.get("approved_at"):
             await self.evidence.append(
