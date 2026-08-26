@@ -1,0 +1,18 @@
+[Unit]
+Description=MOSS 550W Web Control Plane
+After=network.target
+Wants=openclaw.service
+
+[Service]
+Type=simple
+WorkingDirectory=/root/.openclaw/workspace/web-console
+ExecStart=/root/.openclaw/workspace/web-console/.venv/bin/python app.py
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=MOSS_MODE=rdk
+Environment=HOST=0.0.0.0
+Environment=PORT=5500
+
+[Install]
+WantedBy=multi-user.target
