@@ -1,0 +1,75 @@
+menu "MOSS MCU Hardware"
+
+config MOSS_UART_TX_GPIO
+    int "RDK link UART TX GPIO"
+    default 17
+
+config MOSS_UART_RX_GPIO
+    int "RDK link UART RX GPIO"
+    default 18
+
+config MOSS_YAW_SERVO_GPIO
+    int "Yaw servo signal GPIO"
+    default 13
+
+config MOSS_PITCH_SERVO_GPIO
+    int "Pitch servo signal GPIO"
+    default 14
+
+config MOSS_SERVO_POWER_EN_GPIO
+    int "Servo power switch enable GPIO"
+    default 12
+
+config MOSS_ESTOP_GPIO
+    int "Physical E-STOP sense GPIO (fail-safe active low)"
+    default 4
+
+config MOSS_STATUS_LED_GPIO
+    int "MCU status LED GPIO"
+    default 48
+
+config MOSS_EYE_PWM_GPIO
+    int "MOSS red eye PWM / MOSFET gate GPIO"
+    default 21
+
+config MOSS_I2C_SDA_GPIO
+    int "Peripheral I2C SDA GPIO"
+    default 8
+
+config MOSS_I2C_SCL_GPIO
+    int "Peripheral I2C SCL GPIO"
+    default 9
+
+config MOSS_IR_RX_GPIO
+    int "IR receiver GPIO"
+    default 10
+
+config MOSS_IR_TX_GPIO
+    int "IR transmitter GPIO"
+    default 11
+
+config MOSS_YAW_MIN_DEG
+    int "Yaw minimum safe angle"
+    default -70
+
+config MOSS_YAW_MAX_DEG
+    int "Yaw maximum safe angle"
+    default 70
+
+config MOSS_PITCH_MIN_DEG
+    int "Pitch minimum safe angle"
+    default -25
+
+config MOSS_PITCH_MAX_DEG
+    int "Pitch maximum safe angle"
+    default 35
+
+config MOSS_WATCHDOG_WARN_MS
+    int "Reject new motion after no RDK heartbeat (ms)"
+    default 5000
+
+config MOSS_WATCHDOG_ESTOP_MS
+    int "Cut servo power after no RDK heartbeat (ms)"
+    default 10000
+
+endmenu

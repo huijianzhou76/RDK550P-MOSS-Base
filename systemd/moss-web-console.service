@@ -6,11 +6,14 @@ Wants=openclaw.service
 [Service]
 Type=simple
 WorkingDirectory=/root/.openclaw/workspace/web-console
-ExecStart=/root/.openclaw/workspace/web-console/.venv/bin/python app.py
+ExecStart=/root/.openclaw/workspace/web-console/.venv/bin/python app_mcu.py
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
 Environment=MOSS_MODE=rdk
+Environment=MOSS_HARDWARE_BACKEND=direct-rdk
+Environment=MOSS_MCU_PORT=auto
+Environment=MOSS_MCU_BAUD=115200
 Environment=HOST=0.0.0.0
 Environment=PORT=5500
 
