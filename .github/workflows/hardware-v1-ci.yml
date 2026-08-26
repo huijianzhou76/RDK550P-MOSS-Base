@@ -7,6 +7,10 @@ on:
     paths:
       - "moss-hardware/**"
       - "moss-mcu/**"
+      - "web-console/app_mcu.py"
+      - "web-console/mcu_service.py"
+      - "systemd/moss-web-console.service"
+      - "setup/install_web_console.sh"
       - "docs/HARDWARE_MIGRATION.md"
       - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/hardware-v1-ci.yml"
@@ -14,6 +18,10 @@ on:
     paths:
       - "moss-hardware/**"
       - "moss-mcu/**"
+      - "web-console/app_mcu.py"
+      - "web-console/mcu_service.py"
+      - "systemd/moss-web-console.service"
+      - "setup/install_web_console.sh"
       - "docs/HARDWARE_MIGRATION.md"
       - "THIRD_PARTY_NOTICES.md"
       - ".github/workflows/hardware-v1-ci.yml"
@@ -26,12 +34,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Compile gateway
+      - name: Compile hardware Python
         run: |
           python -m py_compile \
             moss-hardware/python/moss_hardware/__init__.py \
             moss-hardware/python/moss_hardware/gateway.py \
-            moss-hardware/python/moss_hardware/cli.py
+            moss-hardware/python/moss_hardware/cli.py \
+            web-console/mcu_service.py \
+            web-console/app_mcu.py
       - name: Run gateway protocol tests
         run: python -m unittest discover -s moss-hardware/python/tests -v
 
@@ -48,3 +58,4 @@ jobs:
           grep -q 'system.estop' moss-mcu/esp32/main/main.cpp
           grep -q 'head.move' moss-mcu/esp32/main/main.cpp
           grep -q 'WATCHDOG' moss-mcu/esp32/main/Kconfig.projbuild
+          grep -q 'app_mcu.py' systemd/moss-web-console.service
