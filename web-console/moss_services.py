@@ -33,6 +33,11 @@ async def run_process(args: list[str], timeout: int = 60) -> tuple[int, str, str
         proc.kill()
         await proc.wait()
         return 124, "", "timeout"
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
     return (
         proc.returncode,
         stdout.decode(errors="replace"),
