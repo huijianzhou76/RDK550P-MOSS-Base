@@ -46,7 +46,7 @@ class McuService:
         if self._gateway_class is None:
             raise RuntimeError(self._error or "moss_hardware gateway is unavailable")
         if self._gateway is None:
-            self._gateway = self._gateway_class(self.port, self.baud)
+            self._gateway = self._gateway_class(self.port, self.baud, heartbeat_interval=2.0)
         return self._gateway
 
     async def _call(self, method: str, *args, **kwargs) -> dict[str, Any]:
@@ -71,6 +71,9 @@ class McuService:
     async def status(self) -> dict[str, Any]:
         return await self._call("status")
 
+    async def capabilities(self) -> dict[str, Any]:
+        return await self._call("capabilities")
+
     async def move_head(self, yaw_deg: float, pitch_deg: float, speed: float) -> dict[str, Any]:
         return await self._call(
             "move_head",
@@ -93,6 +96,18 @@ class McuService:
 
     async def display_text(self, text: str, duration_ms: int) -> dict[str, Any]:
         return await self._call("display_text", text, duration_ms)
+
+    async def read_sensors(self) -> dict[str, Any]:
+        return await self._call("read_sensors")
+
+    async def ir_learn(self, slot: str, timeout_ms: int) -> dict[str, Any]:
+        return await self._call("ir_learn", slot, timeout_ms)
+
+    async def ir_send(self, slot: str, repeat: int) -> dict[str, Any]:
+        return await self._call("ir_send", slot, repeat)
+
+    async def ir_list(self) -> dict[str, Any]:
+        return await self._call("ir_list")
 
     async def close(self) -> None:
         gateway = self._gateway
