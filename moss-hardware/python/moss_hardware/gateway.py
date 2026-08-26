@@ -31,8 +31,9 @@ class McuResponse:
 class McuGateway:
     """JSONL serial gateway between RDK X5 and the realtime MCU.
 
-    The gateway deliberately exposes high-level actions only. It never exposes
-    arbitrary GPIO or shell commands to the MOSS control plane.
+    Only high-level, bounded hardware actions are exposed. A dedicated heartbeat
+    keeps the MCU watchdog informed that the RDK control plane is alive even
+    when the robot is idle.
     """
 
     def __init__(
@@ -40,18 +41,22 @@ class McuGateway:
         port: str,
         baud: int = 115200,
         timeout: float = 3.0,
+        heartbeat_interval: float = 2.0,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.port = port
         self.baud = baud
         self.timeout = timeout
+        self.heartbeat_interval = max(0.5, float(heartbeat_interval))
         self.event_callback = event_callback
         self._serial = None
         self._reader: threading.Thread | None = None
+        self._heartbeat: threading.Thread | None = None
         self._stop = threading.Event()
         self._pending: dict[str, queue.Queue[dict[str, Any]]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
+        self._capabilities_cache: dict[str, Any] | None = None
 
     @property
     def connected(self) -> bool:
@@ -69,8 +74,10 @@ class McuGateway:
             write_timeout=1.0,
         )
         self._stop.clear()
-        self._reader = threading.Thread(target=self._reader_loop, daemon=True)
+        self._reader = threading.Thread(target=self._reader_loop, name="moss-mcu-reader", daemon=True)
         self._reader.start()
+        self._heartbeat = threading.Thread(target=self._heartbeat_loop, name="moss-mcu-heartbeat", daemon=True)
+        self._heartbeat.start()
 
     def close(self) -> None:
         self._stop.set()
@@ -81,8 +88,20 @@ class McuGateway:
                 ser.close()
             except Exception:
                 pass
-        if self._reader and self._reader.is_alive():
-            self._reader.join(timeout=1.0)
+        for thread in (self._reader, self._heartbeat):
+            if thread and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=1.0)
+
+    def _heartbeat_loop(self) -> None:
+        while not self._stop.wait(self.heartbeat_interval):
+            if not self.connected:
+                continue
+            try:
+                self.command("system.heartbeat", timeout=min(1.5, self.timeout))
+            except Exception:
+                # Status is surfaced by explicit API calls; the heartbeat thread
+                # must never terminate the process just because the cable is gone.
+                continue
 
     def _reader_loop(self) -> None:
         while not self._stop.is_set():
@@ -146,8 +165,11 @@ class McuGateway:
         try:
             payload = (json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
             with self._write_lock:
-                self._serial.write(payload)
-                self._serial.flush()
+                ser = self._serial
+                if ser is None:
+                    raise McuGatewayError("MCU serial connection closed")
+                ser.write(payload)
+                ser.flush()
             try:
                 response = waiter.get(timeout=timeout or self.timeout)
             except queue.Empty as exc:
@@ -170,6 +192,12 @@ class McuGateway:
 
     def status(self) -> McuResponse:
         return self.command("system.status")
+
+    def capabilities(self, refresh: bool = False) -> McuResponse:
+        response = self.command("system.capabilities")
+        if response.ok:
+            self._capabilities_cache = response.data
+        return response
 
     def emergency_stop(self) -> McuResponse:
         return self.command("system.estop", timeout=1.0)
@@ -194,11 +222,11 @@ class McuGateway:
                 "pitch_deg": float(pitch_deg),
                 "speed": float(speed),
             },
-            timeout=8.0,
+            timeout=3.0,
         )
 
-    def center_head(self) -> McuResponse:
-        return self.command("head.center", timeout=8.0)
+    def center_head(self, speed: float = 0.45) -> McuResponse:
+        return self.command("head.center", {"speed": float(speed)}, timeout=3.0)
 
     def set_light(
         self,
@@ -223,3 +251,23 @@ class McuGateway:
             "display.text",
             {"text": str(text)[:128], "duration_ms": int(duration_ms)},
         )
+
+    def read_sensors(self) -> McuResponse:
+        return self.command("sensor.read")
+
+    def ir_learn(self, slot: str, timeout_ms: int = 4000) -> McuResponse:
+        return self.command(
+            "ir.learn",
+            {"slot": str(slot)[:16], "timeout_ms": max(500, min(int(timeout_ms), 4500))},
+            timeout=max(2.0, min(int(timeout_ms), 4500) / 1000.0 + 1.0),
+        )
+
+    def ir_send(self, slot: str, repeat: int = 1) -> McuResponse:
+        return self.command(
+            "ir.send",
+            {"slot": str(slot)[:16], "repeat": max(1, min(int(repeat), 5))},
+            timeout=4.0,
+        )
+
+    def ir_list(self) -> McuResponse:
+        return self.command("ir.list")
