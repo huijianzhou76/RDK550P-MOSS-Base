@@ -37,7 +37,7 @@ DATA.mkdir(parents=True, exist_ok=True)
 app = FastAPI(
     title="MOSS 550W Control API",
     description="Autonomous control plane for RDK550P-MOSS + OpenClaw",
-    version="0.3.0",
+    version="0.4.0",
 )
 app.mount("/media", StaticFiles(directory=MEDIA), name="media")
 
@@ -75,6 +75,7 @@ class MissionRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=20_000)
     priority: str = "normal"
     auto_run: bool = True
+    timeout_seconds: int = Field(default=900, ge=30, le=3600)
 
 
 class ApprovalRequest(BaseModel):
@@ -100,10 +101,7 @@ async def _mission_stage(
     progress: int,
     payload: dict[str, Any],
 ) -> None:
-    updates: dict[str, Any] = {
-        "progress": progress,
-        "stage": stage,
-    }
+    updates: dict[str, Any] = {"progress": progress, "stage": stage}
     if "plan" in payload:
         updates["plan"] = payload["plan"]
     if "risk" in payload:
@@ -122,6 +120,7 @@ async def _run_mission(mission_id: str) -> None:
     if not mission:
         return
 
+    timeout_seconds = max(30, min(int(mission.get("timeout_seconds") or 900), 3600))
     await runtime.set_state(mission="running", agent="thinking")
     await missions.update(
         mission_id,
@@ -129,6 +128,7 @@ async def _run_mission(mission_id: str) -> None:
         progress=5,
         stage="analysis",
         error=None,
+        started_at=int(time.time()),
     )
     await runtime.broadcast(
         "mission.started",
@@ -136,16 +136,65 @@ async def _run_mission(mission_id: str) -> None:
             "id": mission_id,
             "title": mission["title"],
             "priority": mission["priority"],
+            "timeout_seconds": timeout_seconds,
         },
     )
 
     try:
-        result = await autonomy.execute(
-            mission,
-            lambda stage, progress, payload: _mission_stage(
-                mission_id, stage, progress, payload
+        result = await asyncio.wait_for(
+            autonomy.execute(
+                mission,
+                lambda stage, progress, payload: _mission_stage(
+                    mission_id, stage, progress, payload
+                ),
             ),
+            timeout=timeout_seconds,
         )
+    except asyncio.TimeoutError:
+        error = f"mission exceeded execution budget: {timeout_seconds}s"
+        await missions.update(
+            mission_id,
+            status="timed_out",
+            stage="timed_out",
+            progress=100,
+            error=error,
+            finished_at=int(time.time()),
+        )
+        await evidence.append(
+            mission_id,
+            "mission.timed_out",
+            {"timeout_seconds": timeout_seconds},
+            actor="moss-core",
+        )
+        await runtime.broadcast(
+            "mission.timed_out",
+            {"id": mission_id, "timeout_seconds": timeout_seconds},
+        )
+        await runtime.set_state(mission="idle", agent="standby")
+        return
+    except asyncio.CancelledError:
+        latest = await missions.get(mission_id) or {}
+        status = latest.get("status")
+        if status not in {"paused", "cancelled"}:
+            status = "cancelled"
+            await missions.update(
+                mission_id,
+                status=status,
+                stage=status,
+                finished_at=int(time.time()),
+            )
+        await evidence.append(
+            mission_id,
+            f"mission.{status}",
+            {"stage": latest.get("stage"), "progress": latest.get("progress")},
+            actor="human-operator",
+        )
+        await runtime.broadcast(
+            f"mission.{status}",
+            {"id": mission_id, "progress": latest.get("progress", 0)},
+        )
+        await runtime.set_state(mission="idle", agent="standby")
+        return
     except Exception as exc:
         error = f"autonomy engine error: {exc}"
         await missions.update(
@@ -154,6 +203,7 @@ async def _run_mission(mission_id: str) -> None:
             stage="failed",
             progress=100,
             error=error,
+            finished_at=int(time.time()),
         )
         await evidence.append(
             mission_id,
@@ -197,6 +247,7 @@ async def _run_mission(mission_id: str) -> None:
             error=error,
             risk=result.get("risk"),
             plan=result.get("plan"),
+            finished_at=int(time.time()),
         )
         await runtime.set_state(mission="idle", agent="standby")
         await runtime.broadcast("mission.failed", {"id": mission_id, "error": error})
@@ -215,6 +266,7 @@ async def _run_mission(mission_id: str) -> None:
         verification_passed=result.get("verification_passed", False),
         sessions=result.get("sessions", {}),
         evidence_id=result.get("evidence_id"),
+        finished_at=int(time.time()),
     )
     await runtime.set_state(mission="idle", agent="standby", risk="low")
     await runtime.broadcast(
@@ -233,6 +285,38 @@ def _schedule_mission(mission_id: str) -> bool:
         lambda _task, mid=mission_id: mission_tasks.pop(mid, None)
     )
     return True
+
+
+async def _interrupt_mission(mission_id: str, status: str) -> dict[str, Any]:
+    mission = await missions.get(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="mission not found")
+    terminal = {"completed", "review_required", "failed", "timed_out", "cancelled", "rejected"}
+    if mission.get("status") in terminal:
+        return {"ok": False, "error": f"mission already terminal: {mission.get('status')}"}
+
+    updated = await missions.update(
+        mission_id,
+        status=status,
+        stage=status,
+        interrupted_at=int(time.time()),
+    )
+    task = mission_tasks.get(mission_id)
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    else:
+        await evidence.append(
+            mission_id,
+            f"mission.{status}",
+            {"previous_status": mission.get("status")},
+            actor="human-operator",
+        )
+        await runtime.broadcast(f"mission.{status}", {"id": mission_id})
+    return {"ok": True, "mission": updated}
 
 
 @app.on_event("startup")
@@ -292,6 +376,7 @@ async def capabilities() -> dict[str, Any]:
             {"id": "policy", "name": "Local risk / approval engine", "available": True, "risk": "low"},
             {"id": "evidence", "name": "Hashed execution evidence", "available": True, "risk": "low"},
             {"id": "heartbeat", "name": "Autonomous health observer", "available": True, "risk": "low"},
+            {"id": "mission-control", "name": "Pause / resume / cancel / timeout budgets", "available": True, "risk": "low"},
             {"id": "memory", "name": "SOUL / Memory documents", "available": True, "risk": "medium"},
             {"id": "vision", "name": "IMX477 snapshot", "available": True, "risk": "medium"},
             {"id": "voice", "name": "Voice Assistant service", "available": True, "risk": "medium"},
@@ -375,6 +460,7 @@ async def create_mission(req: MissionRequest) -> dict[str, Any]:
         plan=analysis["plan"],
         risk=analysis["risk"],
         stage="queued",
+        timeout_seconds=req.timeout_seconds,
     ) or mission
     await runtime.broadcast("mission.created", mission)
     if req.auto_run:
@@ -401,10 +487,53 @@ async def run_mission(mission_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="mission not found")
     if mission.get("approval_status") == "rejected":
         return {"ok": False, "error": "mission was rejected"}
+    if mission.get("status") == "cancelled":
+        return {"ok": False, "error": "cancelled mission must be recreated"}
     if not _schedule_mission(mission_id):
         return {"ok": False, "error": "mission already running"}
     await missions.update(mission_id, status="queued", progress=0, error=None)
     return {"ok": True, "mission_id": mission_id}
+
+
+@app.post("/api/missions/{mission_id}/pause")
+async def pause_mission(mission_id: str) -> dict[str, Any]:
+    return await _interrupt_mission(mission_id, "paused")
+
+
+@app.post("/api/missions/{mission_id}/resume")
+async def resume_mission(mission_id: str) -> dict[str, Any]:
+    mission = await missions.get(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="mission not found")
+    if mission.get("status") != "paused":
+        return {"ok": False, "error": "only paused missions can be resumed"}
+    resume_count = int(mission.get("resume_count") or 0) + 1
+    await missions.update(
+        mission_id,
+        status="queued",
+        stage="queued",
+        error=None,
+        resume_count=resume_count,
+        resumed_at=int(time.time()),
+    )
+    await evidence.append(
+        mission_id,
+        "mission.resumed",
+        {"resume_count": resume_count},
+        actor="human-operator",
+    )
+    await runtime.broadcast(
+        "mission.resumed",
+        {"id": mission_id, "resume_count": resume_count},
+    )
+    if not _schedule_mission(mission_id):
+        return {"ok": False, "error": "mission already running"}
+    return {"ok": True, "mission_id": mission_id, "resume_count": resume_count}
+
+
+@app.post("/api/missions/{mission_id}/cancel")
+async def cancel_mission(mission_id: str) -> dict[str, Any]:
+    return await _interrupt_mission(mission_id, "cancelled")
 
 
 @app.post("/api/missions/{mission_id}/approval")
@@ -545,11 +674,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             except json.JSONDecodeError:
                 data = {"raw": raw}
             await ws.send_json(
-                {
-                    "event": "client.echo",
-                    "payload": data,
-                    "ts": int(time.time() * 1000),
-                }
+                {"event": "client.echo", "payload": data, "ts": int(time.time() * 1000)}
             )
     except WebSocketDisconnect:
         runtime.disconnect(ws)
