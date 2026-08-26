@@ -62,7 +62,7 @@
 | 1 | 电流/电压传感器 | INA219 模块，常见 0.1Ω shunt 版本 | 0x40 |
 | 1 | 温湿度传感器 | AHT20 I2C 模块 | 0x38 |
 
-默认 I2C：GPIO8=SDA、GPIO9=SCL。三个模块并联到同一 SDA/SCL，全部使用 3.3V 逻辑侧供电。INA219 的测量端串在**舵机 5V 正极**中，用来观察舵机母线电压和电流。
+默认 I2C：GPIO8=SDA、GPIO9=SCL。三个模块并联到同一 SDA/SCL，全部使用 3.3V 逻辑侧供电。INA219 放在 Servo Power Switch **之后**的舵机 5V 正极中，这样急停切电后可以验证 Servo Rail 是否真的降到 0V。
 
 ## G. 必买：红外学习/发送
 
@@ -81,13 +81,14 @@
 | 数量 | 物料 | 推荐规格 | 备注 |
 |---:|---|---|---|
 | 1 | 蘑菇头急停按钮 | 自锁旋转释放，至少 1NC 常闭触点，建议 2NC | GPIO4 使用 fail-safe 常闭检测 |
+| 1 | 电阻 | 10kΩ | GPIO4 外部下拉，作为急停检测硬件冗余 |
 | 1 | 小型保险/保险座 | 用于舵机 5V 支路 | 额定值按最终实测电流与线径选择 |
 | 若干 | 接线端子/JST/杜邦线 | 22–26AWG 信号，舵机电源使用更粗线径 | 电机电源不要走细杜邦线 |
 | 1 | 洞洞板/接线板 | 原型阶段 | 后续再画正式 PCB |
 
-急停检测接法：健康状态 `ESP32 GPIO4 ← NC 急停触点 ← 3.3V`；按下、触点断开、线缆脱落都会由 ESP32 内部下拉变为 LOW 并锁存急停。
+急停检测接法：健康状态 `ESP32 GPIO4 ← NC 急停触点 ← 3.3V`；按下、触点断开、线缆脱落都会由外部 10k + ESP32 内部下拉变为 LOW 并锁存急停。
 
-如果购买 2NC 急停，可把第二组 NC 用于后续独立硬件电源切断回路。
+如果购买 2NC 急停，可把第二组 NC 用于后续独立硬件电源安全链。
 
 ## I. 机械结构
 
@@ -113,12 +114,12 @@
 
 ```text
 AC
-├── RDK X5 5V/5A USB-C  ──> RDK X5
-│                          └─ USB Audio / Camera
+├── RDK X5 5V/5A USB-C ──> RDK X5
+│                         └─ USB Audio / Camera
 │
-└── Servo 5V/5A PSU ──> INA219 ──> Servo Power Switch ──> PTK7465 x2
+└── Servo 5V/5A PSU ──┬──> 5V Red Eye LED（经独立 PWM MOSFET）
                       │
-                      └─ 5V Red Eye LED
+                      └──> Servo Power Switch ──> INA219 ──> PTK7465 x2
 
 ESP32-S3 由 USB/开发板 5V 输入供电
 所有低压系统 GND 最终共地
