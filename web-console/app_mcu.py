@@ -33,6 +33,16 @@ class DisplayRequest(BaseModel):
     duration_ms: int = Field(default=3000, ge=100, le=60_000)
 
 
+class IrLearnRequest(BaseModel):
+    slot: str = Field(min_length=1, max_length=16, pattern=r"^[A-Za-z0-9_.-]+$")
+    timeout_ms: int = Field(default=4000, ge=500, le=4500)
+
+
+class IrSendRequest(BaseModel):
+    slot: str = Field(min_length=1, max_length=16, pattern=r"^[A-Za-z0-9_.-]+$")
+    repeat: int = Field(default=1, ge=1, le=5)
+
+
 async def _hardware_event(name: str, result: dict[str, Any]) -> dict[str, Any]:
     await runtime.set_state(hardware="ready" if result.get("ok") else "error")
     await runtime.broadcast(name, result)
@@ -54,6 +64,12 @@ async def mcu_ping() -> dict[str, Any]:
 async def mcu_status() -> dict[str, Any]:
     result = await mcu.status()
     return await _hardware_event("hardware.mcu.status", result)
+
+
+@app.get("/api/hardware/mcu/capabilities")
+async def mcu_capabilities() -> dict[str, Any]:
+    result = await mcu.capabilities()
+    return await _hardware_event("hardware.mcu.capabilities", result)
 
 
 @app.post("/api/hardware/mcu/head/move")
@@ -97,6 +113,31 @@ async def mcu_light(req: LightRequest) -> dict[str, Any]:
 async def mcu_display(req: DisplayRequest) -> dict[str, Any]:
     result = await mcu.display_text(req.text, req.duration_ms)
     return await _hardware_event("hardware.mcu.display", result)
+
+
+@app.get("/api/hardware/mcu/sensors")
+async def mcu_sensors() -> dict[str, Any]:
+    result = await mcu.read_sensors()
+    return await _hardware_event("hardware.mcu.sensors", result)
+
+
+@app.get("/api/hardware/mcu/ir")
+async def mcu_ir_slots() -> dict[str, Any]:
+    result = await mcu.ir_list()
+    return await _hardware_event("hardware.mcu.ir.slots", result)
+
+
+@app.post("/api/hardware/mcu/ir/learn")
+async def mcu_ir_learn(req: IrLearnRequest) -> dict[str, Any]:
+    await runtime.set_state(hardware="busy")
+    result = await mcu.ir_learn(req.slot, req.timeout_ms)
+    return await _hardware_event("hardware.mcu.ir.learned", result)
+
+
+@app.post("/api/hardware/mcu/ir/send")
+async def mcu_ir_send(req: IrSendRequest) -> dict[str, Any]:
+    result = await mcu.ir_send(req.slot, req.repeat)
+    return await _hardware_event("hardware.mcu.ir.sent", result)
 
 
 @app.on_event("shutdown")
