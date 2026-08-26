@@ -16,9 +16,33 @@ config MOSS_PITCH_SERVO_GPIO
     int "Pitch servo signal GPIO"
     default 14
 
+config MOSS_ESTOP_GPIO
+    int "Physical E-STOP GPIO (active low)"
+    default 4
+
 config MOSS_STATUS_LED_GPIO
-    int "Status LED GPIO"
+    int "MCU status LED GPIO"
     default 48
+
+config MOSS_EYE_PWM_GPIO
+    int "MOSS red eye PWM / MOSFET gate GPIO"
+    default 21
+
+config MOSS_I2C_SDA_GPIO
+    int "Peripheral I2C SDA GPIO"
+    default 8
+
+config MOSS_I2C_SCL_GPIO
+    int "Peripheral I2C SCL GPIO"
+    default 9
+
+config MOSS_IR_RX_GPIO
+    int "IR receiver GPIO"
+    default 10
+
+config MOSS_IR_TX_GPIO
+    int "IR transmitter GPIO"
+    default 11
 
 config MOSS_YAW_MIN_DEG
     int "Yaw minimum safe angle"
@@ -37,11 +61,11 @@ config MOSS_PITCH_MAX_DEG
     default 35
 
 config MOSS_WATCHDOG_WARN_MS
-    int "Stop accepting motion after no heartbeat (ms)"
+    int "Reject new motion after no RDK heartbeat (ms)"
     default 5000
 
 config MOSS_WATCHDOG_ESTOP_MS
-    int "Enter motion-safe state after no heartbeat (ms)"
+    int "Disable motion output after no RDK heartbeat (ms)"
     default 10000
 
 endmenu
