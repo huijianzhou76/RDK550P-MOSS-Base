@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import glob
 import os
 import sys
 from pathlib import Path
 from typing import Any
+
+
+def _resolve_serial_port(configured: str) -> str:
+    if configured and configured.lower() != "auto":
+        return configured
+    candidates: list[str] = []
+    for pattern in ("/dev/ttyACM*", "/dev/ttyUSB*", "/dev/serial/by-id/*"):
+        candidates.extend(sorted(glob.glob(pattern)))
+    return candidates[0] if candidates else "/dev/ttyACM0"
 
 
 class McuService:
@@ -13,7 +23,8 @@ class McuService:
     def __init__(self, root: Path, mode: str) -> None:
         self.root = root
         self.mode = mode
-        self.port = os.getenv("MOSS_MCU_PORT", "/dev/ttyACM0")
+        self.port_config = os.getenv("MOSS_MCU_PORT", "auto")
+        self.port = _resolve_serial_port(self.port_config)
         self.baud = int(os.getenv("MOSS_MCU_BAUD", "115200"))
         self.enabled = os.getenv("MOSS_HARDWARE_BACKEND", "mock" if mode == "mock" else "direct-rdk").lower() == "mcu"
         self._gateway = None
@@ -25,7 +36,7 @@ class McuService:
         try:
             from moss_hardware import McuGateway  # type: ignore
             self._gateway_class = McuGateway
-        except Exception as exc:  # pyserial/package may not be installed on dev host
+        except Exception as exc:
             self._gateway_class = None
             self._error = str(exc)
 
@@ -33,6 +44,7 @@ class McuService:
         return {
             "enabled": self.enabled,
             "backend": "mcu" if self.enabled else "disabled",
+            "port_config": self.port_config,
             "port": self.port,
             "baud": self.baud,
             "gateway_available": self._gateway_class is not None,
@@ -46,6 +58,7 @@ class McuService:
         if self._gateway_class is None:
             raise RuntimeError(self._error or "moss_hardware gateway is unavailable")
         if self._gateway is None:
+            self.port = _resolve_serial_port(self.port_config)
             self._gateway = self._gateway_class(self.port, self.baud, heartbeat_interval=2.0)
         return self._gateway
 
@@ -75,12 +88,7 @@ class McuService:
         return await self._call("capabilities")
 
     async def move_head(self, yaw_deg: float, pitch_deg: float, speed: float) -> dict[str, Any]:
-        return await self._call(
-            "move_head",
-            yaw_deg=yaw_deg,
-            pitch_deg=pitch_deg,
-            speed=speed,
-        )
+        return await self._call("move_head", yaw_deg=yaw_deg, pitch_deg=pitch_deg, speed=speed)
 
     async def center_head(self) -> dict[str, Any]:
         return await self._call("center_head")
