@@ -10,6 +10,7 @@
 namespace {
 const char *TAG = "MOSS_IR";
 constexpr uint32_t RMT_RESOLUTION_HZ = 1000000;  // 1 tick = 1 us
+constexpr uint32_t IR_CARRIER_HZ = 38000;
 }
 
 bool IrService::init(int rx_gpio, int tx_gpio) {
@@ -34,6 +35,13 @@ bool IrService::init(int rx_gpio, int tx_gpio) {
     if (rmt_new_tx_channel(&tx_config, &tx_channel_) != ESP_OK) return false;
     if (rmt_enable(tx_channel_) != ESP_OK) return false;
 
+    rmt_carrier_config_t carrier = {};
+    carrier.frequency_hz = IR_CARRIER_HZ;
+    carrier.duty_cycle = 0.33f;
+    carrier.flags.polarity_active_low = false;
+    carrier.flags.always_on = false;
+    if (rmt_apply_carrier(tx_channel_, &carrier) != ESP_OK) return false;
+
     rmt_copy_encoder_config_t copy_config = {};
     if (rmt_new_copy_encoder(&copy_config, &copy_encoder_) != ESP_OK) return false;
 
@@ -41,7 +49,7 @@ bool IrService::init(int rx_gpio, int tx_gpio) {
     if (!rx_done_) return false;
 
     ready_ = true;
-    ESP_LOGI(TAG, "IR ready rx=%d tx=%d", rx_gpio, tx_gpio);
+    ESP_LOGI(TAG, "IR ready rx=%d tx=%d carrier=%uHz", rx_gpio, tx_gpio, IR_CARRIER_HZ);
     return true;
 }
 
@@ -95,7 +103,14 @@ bool IrService::learn(const std::string &slot_name, int timeout_ms, size_t *symb
     if (rx_count_ == 0) return false;
 
     slot->count = std::min<size_t>(rx_count_, MAX_SYMBOLS);
-    memcpy(slot->symbols, rx_buffer_, slot->count * sizeof(rmt_symbol_word_t));
+    // Typical 38kHz demodulating receivers output LOW while a carrier burst is
+    // present. RMT TX carrier is applied to HIGH levels, so invert the learned
+    // levels while preserving durations.
+    for (size_t i = 0; i < slot->count; ++i) {
+        slot->symbols[i] = rx_buffer_[i];
+        slot->symbols[i].level0 = !rx_buffer_[i].level0;
+        slot->symbols[i].level1 = !rx_buffer_[i].level1;
+    }
     if (symbol_count) *symbol_count = slot->count;
     ESP_LOGI(TAG, "learned slot=%s symbols=%u", slot->name.c_str(), static_cast<unsigned>(slot->count));
     return true;
