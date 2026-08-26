@@ -3,173 +3,327 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import subprocess
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+
+from moss_runtime import MossRuntime, system_metrics
+from moss_services import (
+    HardwareService,
+    MemoryService,
+    MissionStore,
+    OpenClawService,
+    VoiceService,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
-STATIC = Path(__file__).resolve().parent / "static"
-SCRIPTS = ROOT / "scripts"
-MODE = os.getenv("MOSS_MODE", "mock").lower()  # mock | rdk
+WEB_ROOT = Path(__file__).resolve().parent
+STATIC = WEB_ROOT / "static"
+DATA = WEB_ROOT / "data"
+MEDIA = ROOT / "media"
+MODE = os.getenv("MOSS_MODE", "mock").strip().lower()
+if MODE not in {"mock", "rdk"}:
+    MODE = "mock"
 
-app = FastAPI(title="MOSS 550W Web Console", version="0.1.0")
-clients: set[WebSocket] = set()
-state: dict[str, Any] = {
-    "mode": MODE,
-    "agent": "standby",
-    "camera": "ready",
-    "voice": "ready",
-    "hardware": "ready",
-    "last_event": "system_initialized",
-    "updated_at": int(time.time()),
-}
+MEDIA.mkdir(parents=True, exist_ok=True)
+DATA.mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(
+    title="MOSS 550W Control API",
+    description="Web control plane for RDK550P-MOSS + OpenClaw",
+    version="0.2.0",
+)
+app.mount("/media", StaticFiles(directory=MEDIA), name="media")
+
+runtime = MossRuntime(MODE)
+agent = OpenClawService(MODE)
+missions = MissionStore(DATA)
+memory = MemoryService(ROOT / "openclaw-templates")
+hardware = HardwareService(ROOT, MODE)
+voice = VoiceService(MODE)
+mission_tasks: dict[str, asyncio.Task[Any]] = {}
 
 
 class AgentRequest(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=20_000)
     session_id: str | None = None
+
+
+class MissionRequest(BaseModel):
+    title: str = Field(default="", max_length=120)
+    prompt: str = Field(min_length=1, max_length=20_000)
+    priority: str = "normal"
+    auto_run: bool = True
 
 
 class ServoRequest(BaseModel):
     action: str
 
 
-async def broadcast(event: str, payload: dict[str, Any] | None = None) -> None:
-    message = {"event": event, "payload": payload or {}, "ts": int(time.time() * 1000)}
-    state["last_event"] = event
-    state["updated_at"] = int(time.time())
-    dead = []
-    for ws in list(clients):
-        try:
-            await ws.send_json(message)
-        except Exception:
-            dead.append(ws)
-    for ws in dead:
-        clients.discard(ws)
+class VoiceControlRequest(BaseModel):
+    action: str
 
 
-async def run_process(args: list[str], timeout: int = 60) -> tuple[int, str, str]:
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+class MemoryWriteRequest(BaseModel):
+    content: str
+
+
+async def _run_mission(mission_id: str) -> None:
+    mission = await missions.get(mission_id)
+    if not mission:
+        return
+
+    await runtime.set_state(mission="running", agent="thinking")
+    await missions.update(mission_id, status="running", progress=10)
+    await runtime.broadcast(
+        "mission.started",
+        {"id": mission_id, "title": mission["title"], "priority": mission["priority"]},
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
-        return 124, "", "timeout"
-    return proc.returncode, stdout.decode(errors="replace"), stderr.decode(errors="replace")
+    await runtime.broadcast("mission.progress", {"id": mission_id, "progress": 25, "stage": "planning"})
+    await missions.update(mission_id, progress=25)
+
+    prompt = (
+        "[MOSS Web Mission]\n"
+        f"任务名称：{mission['title']}\n"
+        f"优先级：{mission['priority']}\n"
+        f"任务要求：{mission['prompt']}\n\n"
+        "请作为 MOSS 执行任务。需要调用现有工具时先执行工具，再给出最终可交付结果。"
+    )
+
+    await runtime.broadcast("mission.progress", {"id": mission_id, "progress": 45, "stage": "agent_execution"})
+    await missions.update(mission_id, progress=45)
+    result = await agent.chat(prompt, mission.get("session_id"))
+
+    if not result.get("ok"):
+        error = result.get("error", "unknown agent error")
+        await missions.update(
+            mission_id,
+            status="failed",
+            progress=100,
+            error=error,
+            session_id=result.get("session_id"),
+        )
+        await runtime.set_state(mission="idle", agent="standby")
+        await runtime.broadcast("mission.failed", {"id": mission_id, "error": error})
+        return
+
+    await runtime.broadcast("mission.progress", {"id": mission_id, "progress": 85, "stage": "verification"})
+    await missions.update(mission_id, progress=85, session_id=result.get("session_id"))
+    await asyncio.sleep(0.15 if MODE == "mock" else 0)
+    reply = result.get("reply", "")
+    updated = await missions.update(
+        mission_id,
+        status="completed",
+        progress=100,
+        result=reply,
+        session_id=result.get("session_id"),
+    )
+    await runtime.set_state(mission="idle", agent="standby")
+    await runtime.broadcast(
+        "mission.completed",
+        {"id": mission_id, "result": reply, "mission": updated},
+    )
 
 
 @app.get("/")
-async def index():
+async def index() -> FileResponse:
     return FileResponse(STATIC / "index.html")
 
 
 @app.get("/api/health")
-async def health():
-    return {"ok": True, "state": state}
+async def health() -> dict[str, Any]:
+    voice_state = await voice.status()
+    runtime.state["voice"] = "active" if voice_state.get("active") else "inactive"
+    return {
+        "ok": True,
+        "version": app.version,
+        "state": runtime.snapshot(),
+        "voice": voice_state,
+    }
+
+
+@app.get("/api/capabilities")
+async def capabilities() -> dict[str, Any]:
+    return {
+        "mode": MODE,
+        "capabilities": [
+            {"id": "agent", "name": "OpenClaw Agent", "available": True},
+            {"id": "missions", "name": "Mission orchestration", "available": True},
+            {"id": "memory", "name": "SOUL / Memory documents", "available": True},
+            {"id": "vision", "name": "IMX477 snapshot", "available": True},
+            {"id": "voice", "name": "Voice Assistant service", "available": True},
+            {"id": "servo", "name": "PWM servo actions", "available": True},
+            {"id": "realtime", "name": "WebSocket event bus", "available": True},
+        ],
+    }
+
+
+@app.get("/api/system/metrics")
+async def metrics() -> dict[str, Any]:
+    return {"ok": True, "metrics": system_metrics(ROOT)}
+
+
+@app.get("/api/events")
+async def events(limit: int = 100) -> dict[str, Any]:
+    return {"ok": True, "events": runtime.recent_events(limit)}
 
 
 @app.post("/api/agent/chat")
-async def agent_chat(req: AgentRequest):
+async def agent_chat(req: AgentRequest) -> dict[str, Any]:
     message = req.message.strip()
-    if not message:
-        return {"ok": False, "error": "message is required"}
+    await runtime.set_state(agent="thinking")
+    await runtime.broadcast("agent.thinking", {"message": message, "session_id": req.session_id})
+    result = await agent.chat(message, req.session_id)
+    await runtime.set_state(agent="standby")
+    if result.get("ok"):
+        await runtime.broadcast("agent.reply", result)
+    else:
+        await runtime.broadcast("agent.error", result)
+    return result
 
-    session_id = req.session_id or f"web-{int(time.time())}-{uuid.uuid4().hex[:6]}"
-    state["agent"] = "thinking"
-    await broadcast("agent.thinking", {"session_id": session_id, "message": message})
 
-    if MODE == "mock":
-        await asyncio.sleep(0.4)
-        reply = f"[MOCK MOSS] 已收到任务：{message}。当前运行于 mock 模式，接入 RDK X5 后会调用真实 OpenClaw Agent。"
-        state["agent"] = "standby"
-        await broadcast("agent.reply", {"session_id": session_id, "reply": reply})
-        return {"ok": True, "session_id": session_id, "reply": reply, "mode": MODE}
+@app.get("/api/missions")
+async def list_missions() -> dict[str, Any]:
+    return {"ok": True, "missions": await missions.list()}
 
-    code, stdout, stderr = await run_process([
-        "openclaw", "agent",
-        "--session-id", session_id,
-        "-m", message,
-        "--timeout", "600",
-        "--thinking", "off",
-    ], timeout=610)
-    state["agent"] = "standby"
-    if code != 0:
-        await broadcast("agent.error", {"session_id": session_id, "stderr": stderr[-1200:]})
-        return {"ok": False, "session_id": session_id, "error": stderr or f"exit code {code}"}
-    reply = stdout.strip()
-    await broadcast("agent.reply", {"session_id": session_id, "reply": reply})
-    return {"ok": True, "session_id": session_id, "reply": reply, "mode": MODE}
+
+@app.post("/api/missions")
+async def create_mission(req: MissionRequest) -> dict[str, Any]:
+    mission = await missions.create(req.title, req.prompt, req.priority)
+    await runtime.broadcast("mission.created", mission)
+    if req.auto_run:
+        task = asyncio.create_task(_run_mission(mission["id"]))
+        mission_tasks[mission["id"]] = task
+        task.add_done_callback(lambda _task, mid=mission["id"]: mission_tasks.pop(mid, None))
+    return {"ok": True, "mission": mission}
+
+
+@app.get("/api/missions/{mission_id}")
+async def get_mission(mission_id: str) -> dict[str, Any]:
+    mission = await missions.get(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="mission not found")
+    return {"ok": True, "mission": mission}
+
+
+@app.post("/api/missions/{mission_id}/run")
+async def run_mission(mission_id: str) -> dict[str, Any]:
+    mission = await missions.get(mission_id)
+    if not mission:
+        raise HTTPException(status_code=404, detail="mission not found")
+    task = mission_tasks.get(mission_id)
+    if task and not task.done():
+        return {"ok": False, "error": "mission already running"}
+    await missions.update(mission_id, status="queued", progress=0, error=None)
+    task = asyncio.create_task(_run_mission(mission_id))
+    mission_tasks[mission_id] = task
+    task.add_done_callback(lambda _task, mid=mission_id: mission_tasks.pop(mid, None))
+    return {"ok": True, "mission_id": mission_id}
+
+
+@app.get("/api/memory")
+async def list_memory_documents() -> dict[str, Any]:
+    return {"ok": True, "documents": memory.list()}
+
+
+@app.get("/api/memory/{key}")
+async def read_memory_document(key: str) -> dict[str, Any]:
+    try:
+        document = memory.read(key)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown memory document")
+    return {"ok": True, "document": document}
+
+
+@app.put("/api/memory/{key}")
+async def write_memory_document(key: str, req: MemoryWriteRequest) -> dict[str, Any]:
+    try:
+        document = memory.write(key, req.content)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="unknown memory document")
+    except ValueError as exc:
+        raise HTTPException(status_code=413, detail=str(exc))
+    await runtime.broadcast("memory.updated", {"key": key.upper(), "size": len(req.content.encode("utf-8"))})
+    return {"ok": True, "document": document}
 
 
 @app.post("/api/camera/snapshot")
-async def camera_snapshot():
-    await broadcast("camera.capture.started")
-    if MODE == "mock":
-        await asyncio.sleep(0.25)
-        await broadcast("camera.capture.completed", {"mock": True})
-        return {"ok": True, "mock": True, "message": "mock snapshot completed"}
+async def camera_snapshot() -> dict[str, Any]:
+    await runtime.set_state(camera="capturing")
+    await runtime.broadcast("camera.capture.started")
+    result = await hardware.snapshot()
+    await runtime.set_state(camera="ready" if result.get("ok") else "error")
+    await runtime.broadcast(
+        "camera.capture.completed" if result.get("ok") else "camera.capture.error",
+        result,
+    )
+    return result
 
-    output = ROOT / "media" / "web-snapshot.jpg"
-    output.parent.mkdir(parents=True, exist_ok=True)
-    code, stdout, stderr = await run_process(["python3", str(SCRIPTS / "snap.py"), str(output)], timeout=20)
-    if code != 0:
-        await broadcast("camera.capture.error", {"stderr": stderr[-800:]})
-        return {"ok": False, "error": stderr or stdout}
-    await broadcast("camera.capture.completed", {"path": str(output)})
-    return {"ok": True, "path": str(output), "message": stdout.strip()}
+
+@app.get("/api/voice/status")
+async def voice_status() -> dict[str, Any]:
+    result = await voice.status()
+    await runtime.set_state(voice="active" if result.get("active") else "inactive")
+    return result
+
+
+@app.post("/api/voice/control")
+async def voice_control(req: VoiceControlRequest) -> dict[str, Any]:
+    await runtime.broadcast("voice.control.started", {"action": req.action})
+    result = await voice.control(req.action.strip().lower())
+    await runtime.set_state(voice="active" if result.get("active") else "inactive")
+    await runtime.broadcast(
+        "voice.control.completed" if result.get("ok") else "voice.control.error",
+        {"action": req.action, **result},
+    )
+    return result
 
 
 @app.post("/api/hardware/servo")
-async def servo(req: ServoRequest):
+async def servo(req: ServoRequest) -> dict[str, Any]:
     action = req.action.strip().lower()
-    allowed = {"dance", "idle"}
-    if action not in allowed:
-        return {"ok": False, "error": f"unsupported action: {action}"}
-    await broadcast("hardware.servo.started", {"action": action})
-    if MODE == "mock":
-        await asyncio.sleep(0.25)
-        await broadcast("hardware.servo.completed", {"action": action, "mock": True})
-        return {"ok": True, "mock": True, "action": action}
-    script = SCRIPTS / ("dance.py" if action == "dance" else "idle_motion.py")
-    code, stdout, stderr = await run_process(["python3", str(script)], timeout=120)
-    if code != 0:
-        await broadcast("hardware.servo.error", {"action": action, "stderr": stderr[-800:]})
-        return {"ok": False, "error": stderr or stdout}
-    await broadcast("hardware.servo.completed", {"action": action})
-    return {"ok": True, "action": action, "message": stdout.strip()}
+    await runtime.set_state(hardware="busy")
+    await runtime.broadcast("hardware.servo.started", {"action": action})
+    result = await hardware.servo(action)
+    await runtime.set_state(hardware="ready" if result.get("ok") else "error")
+    await runtime.broadcast(
+        "hardware.servo.completed" if result.get("ok") else "hardware.servo.error",
+        result,
+    )
+    return result
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
-    await ws.accept()
-    clients.add(ws)
-    await ws.send_json({"event": "system.state", "payload": state, "ts": int(time.time() * 1000)})
+async def websocket_endpoint(ws: WebSocket) -> None:
+    await runtime.connect(ws)
     try:
         while True:
             raw = await ws.receive_text()
             if raw == "ping":
                 await ws.send_text("pong")
-            else:
-                try:
-                    data = json.loads(raw)
-                except json.JSONDecodeError:
-                    data = {"raw": raw}
-                await ws.send_json({"event": "client.echo", "payload": data, "ts": int(time.time() * 1000)})
+                continue
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                data = {"raw": raw}
+            await ws.send_json(
+                {"event": "client.echo", "payload": data, "ts": int(time.time() * 1000)}
+            )
     except WebSocketDisconnect:
-        clients.discard(ws)
+        runtime.disconnect(ws)
 
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", "5500")), reload=False)
+
+    uvicorn.run(
+        "app:app",
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "5500")),
+        reload=False,
+    )
