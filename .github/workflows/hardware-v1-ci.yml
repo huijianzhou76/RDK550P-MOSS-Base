@@ -1,0 +1,50 @@
+name: MOSS Hardware V1 CI
+
+on:
+  push:
+    branches:
+      - feature/hardware-v1
+    paths:
+      - "moss-hardware/**"
+      - "moss-mcu/**"
+      - "docs/HARDWARE_MIGRATION.md"
+      - "THIRD_PARTY_NOTICES.md"
+      - ".github/workflows/hardware-v1-ci.yml"
+  pull_request:
+    paths:
+      - "moss-hardware/**"
+      - "moss-mcu/**"
+      - "docs/HARDWARE_MIGRATION.md"
+      - "THIRD_PARTY_NOTICES.md"
+      - ".github/workflows/hardware-v1-ci.yml"
+
+jobs:
+  gateway-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Compile gateway
+        run: |
+          python -m py_compile \
+            moss-hardware/python/moss_hardware/__init__.py \
+            moss-hardware/python/moss_hardware/gateway.py \
+            moss-hardware/python/moss_hardware/cli.py
+      - name: Run gateway protocol tests
+        run: python -m unittest discover -s moss-hardware/python/tests -v
+
+  firmware-structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check ESP-IDF project structure
+        run: |
+          test -f moss-mcu/esp32/CMakeLists.txt
+          test -f moss-mcu/esp32/main/CMakeLists.txt
+          test -f moss-mcu/esp32/main/Kconfig.projbuild
+          test -f moss-mcu/esp32/main/main.cpp
+          grep -q 'system.estop' moss-mcu/esp32/main/main.cpp
+          grep -q 'head.move' moss-mcu/esp32/main/main.cpp
+          grep -q 'WATCHDOG' moss-mcu/esp32/main/Kconfig.projbuild
