@@ -2,7 +2,7 @@
 
 这是在原 `RDK550P-MOSS` 基础上新增的可视化控制层和自主智能体编排层。它不替换原项目的 Voice Assistant、OpenClaw、摄像头和舵机脚本，而是把这些能力统一编排成一个可观察、可审批、可验证、可持续扩展的 MOSS 系统。
 
-当前版本：**0.3.0**
+当前版本：**0.4.0**
 
 ## 当前架构
 
@@ -47,7 +47,10 @@ WebSocket / State        Risk / Approval
 - **风险策略层**：本地确定性规则在 LLM 之前评估 low / medium / high / critical 风险
 - **Human-in-the-loop**：high / critical 任务必须人工批准，未批准不会进入 Agent 执行阶段
 - **安全 Chat 通道**：高风险请求不能通过普通 Web Chat 绕过 Mission 审批
-- **Evidence Chain**：Planner、Operator、Verifier、审批、最终交付均写入 JSONL 证据记录并计算 SHA-256
+- **Mission Runtime Control**：任务支持 pause / resume / cancel，并记录恢复次数
+- **Execution Budget**：每个 Mission 可设置 30–3600 秒执行预算，超时会终止运行中的 Agent 子进程
+- **子进程取消清理**：任务暂停、取消和超时时会终止对应 OpenClaw 子进程，避免孤儿进程继续执行
+- **Evidence Chain**：Planner、Operator、Verifier、审批、中断、超时、最终交付均写入 JSONL 证据记录并计算 SHA-256
 - **Heartbeat**：后台周期观察系统指标和语音服务状态，只告警、不自动执行破坏性修复
 - **WebSocket 实时事件总线**：任务、Agent、Heartbeat、摄像头、语音、硬件事件实时推送
 - **视觉系统**：调用原 `scripts/snap.py` 并在网页显示最近快照
@@ -84,6 +87,18 @@ Local Policy Assessment
                                                   |
                                                Delivery
 ```
+
+运行中的任务还可以进入：
+
+```text
+RUNNING -> PAUSED -> RESUME -> RUNNING
+   |
+   +-> CANCELLED
+   |
+   `-> TIMED_OUT
+```
+
+`pause` 不会尝试冻结一个未知状态的外部 Agent 进程，而是安全终止当前执行，并把 Mission 保存为 `paused`。`resume` 会重新从规划阶段启动，以避免从半执行状态直接续跑导致不可审计行为。
 
 `Verifier` 使用与执行者不同的 session，并被明确要求不得继续执行工具，只负责独立检查任务满足程度、越权行为和不可验证断言。
 
@@ -181,6 +196,21 @@ MOSS_HEARTBEAT_INTERVAL=60
 - `GET /api/missions/{mission_id}`：同时返回该任务 Evidence
 - `POST /api/missions/{mission_id}/run`
 - `POST /api/missions/{mission_id}/approval`
+- `POST /api/missions/{mission_id}/pause`
+- `POST /api/missions/{mission_id}/resume`
+- `POST /api/missions/{mission_id}/cancel`
+
+创建 Mission 可指定执行预算：
+
+```json
+{
+  "title": "检查系统",
+  "prompt": "分析当前系统状态",
+  "priority": "normal",
+  "auto_run": true,
+  "timeout_seconds": 900
+}
+```
 
 批准：
 
@@ -228,7 +258,7 @@ MOSS_HEARTBEAT_INTERVAL=60
 
 - `WS /ws`
 
-新增事件包括：
+关键事件包括：
 
 - `system.autonomy_ready`
 - `heartbeat.tick`
@@ -237,6 +267,10 @@ MOSS_HEARTBEAT_INTERVAL=60
 - `mission.approved`
 - `mission.rejected`
 - `mission.progress`
+- `mission.paused`
+- `mission.resumed`
+- `mission.cancelled`
+- `mission.timed_out`
 - `mission.completed`
 - `mission.review_required`
 - `agent.blocked_by_policy`
@@ -256,9 +290,10 @@ web-console/data/evidence.jsonl  # 执行审计证据链
 2. high / critical Mission 必须有 `approved_at` 才会进入 Planner / Operator / Verifier。
 3. Heartbeat 只发现与报告异常，不自动执行破坏性修复。
 4. 硬件直接 API 仍采用动作白名单。
-5. Evidence 使用 SHA-256 记录内容摘要，便于发现审计记录被意外修改；它不是数字签名，不能替代可信签名系统。
-6. 当前 Web Console 面向可信局域网开发环境；暴露公网前仍需认证、TLS、用户角色与 CSRF 防护。
-7. OpenClaw 本身可拥有更多工具权限，因此生产环境还应在 OpenClaw 工具层增加对应的权限策略，而不是只依赖 Web 层。
+5. Mission pause / cancel / timeout 会终止当前 OpenClaw 子进程，避免任务表面停止但实际继续运行。
+6. Evidence 使用 SHA-256 记录内容摘要，便于发现审计记录被意外修改；它不是数字签名，不能替代可信签名系统。
+7. 当前 Web Console 面向可信局域网开发环境；暴露公网前仍需认证、TLS、用户角色与 CSRF 防护。
+8. OpenClaw 本身可拥有更多工具权限，因此生产环境还应在 OpenClaw 工具层增加对应的权限策略，而不是只依赖 Web 层。
 
 ## 分支策略
 
@@ -275,5 +310,4 @@ web-console/data/evidence.jsonl  # 执行审计证据链
 - 子 Agent 能力注册表和动态路由
 - 用户身份、RBAC、设备级权限
 - Evidence 签名 / append-only 审计
-- 任务取消、暂停、恢复和超时预算
 - Heartbeat / Cron 可视化规则编辑器
