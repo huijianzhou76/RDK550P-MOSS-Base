@@ -11,6 +11,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Virtual environments
+.venv/
+web-console/.venv/
+
 # 临时文件
 *.tmp
 *.log
@@ -18,6 +22,9 @@ __pycache__/
 
 # 媒体文件
 media/
+
+# MOSS Web Console runtime state
+web-console/data/
 
 # 备份
 backups/
