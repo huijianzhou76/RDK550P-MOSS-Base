@@ -73,7 +73,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build ESP32-S3 firmware
+        shell: bash
         working-directory: moss-mcu/esp32
         run: |
+          source /opt/esp/idf/export.sh
           idf.py set-target esp32s3
           idf.py build
