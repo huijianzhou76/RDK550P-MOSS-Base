@@ -35,8 +35,9 @@ jobs:
           python -m py_compile \
             web-console/app.py \
             web-console/moss_runtime.py \
-            web-console/moss_services.py
+            web-console/moss_services.py \
+            web-console/moss_autonomy.py
 
-      - name: Run service tests
+      - name: Run service and autonomy tests
         working-directory: web-console
         run: python -m unittest discover -s tests -v
