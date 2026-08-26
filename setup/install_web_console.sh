@@ -15,6 +15,7 @@ fi
 python3 -m venv "$WEB_DIR/.venv"
 "$WEB_DIR/.venv/bin/pip" install --upgrade pip
 "$WEB_DIR/.venv/bin/pip" install -r "$WEB_DIR/requirements.txt"
+"$WEB_DIR/.venv/bin/pip" install pyserial==3.5
 
 if [[ ! -f "$SERVICE_SRC" ]]; then
   echo "ERROR: missing $SERVICE_SRC"
@@ -33,3 +34,5 @@ echo
 echo "MOSS Web Console installed."
 echo "Open: http://<RDK-X5-IP>:5500"
 echo "Logs: journalctl -u moss-web-console.service -f"
+echo "Hardware backend: edit MOSS_HARDWARE_BACKEND in $SERVICE_DST (direct-rdk or mcu)."
+echo "MCU default port: /dev/ttyACM0 @ 115200"
