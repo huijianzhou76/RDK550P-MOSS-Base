@@ -1,0 +1,42 @@
+name: MOSS Web Console CI
+
+on:
+  push:
+    branches:
+      - develop
+      - feature/web-console
+    paths:
+      - "web-console/**"
+      - ".github/workflows/web-console-ci.yml"
+  pull_request:
+    paths:
+      - "web-console/**"
+      - ".github/workflows/web-console-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r web-console/requirements.txt
+
+      - name: Compile Python
+        run: |
+          python -m py_compile \
+            web-console/app.py \
+            web-console/moss_runtime.py \
+            web-console/moss_services.py
+
+      - name: Run service tests
+        working-directory: web-console
+        run: python -m unittest discover -s tests -v
