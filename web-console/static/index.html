@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MOSS 550W Console</title>
+<style>
+:root{--bg:#070809;--panel:#111315;--panel2:#171a1d;--line:#2a2f34;--text:#edf1f3;--muted:#8b949e;--red:#d44747;--red2:#7f2020;--green:#4fbf77}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at top,#151719,#070809 48%);color:var(--text);font-family:Inter,"Microsoft YaHei",system-ui,sans-serif}.app{min-height:100vh;display:grid;grid-template-columns:220px minmax(0,1fr) 280px;gap:14px;padding:14px}.panel{background:rgba(17,19,21,.92);border:1px solid var(--line);border-radius:18px}.side{padding:14px}.brand{padding:8px 8px 16px;border-bottom:1px solid var(--line)}.brand h1{font-size:17px;margin:4px 0;letter-spacing:.18em}.tiny{font-size:11px;color:var(--muted);letter-spacing:.08em}.nav{display:grid;gap:8px;margin-top:14px}.nav button,.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;padding:11px 12px;text-align:left;cursor:pointer}.nav button.active,.btn.primary{border-color:var(--red);background:rgba(212,71,71,.11)}.center{display:grid;gap:14px}.hero{padding:18px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:22px;align-items:center}.core{width:180px;height:180px;margin:auto;border-radius:50%;border:1px solid #4d545a;display:grid;place-items:center;position:relative;background:radial-gradient(circle,#351112 0,#151719 48%,#0a0b0c 70%)}.core:before,.core:after{content:"";position:absolute;border:1px dashed #5c6268;border-radius:50%}.core:before{inset:18px}.core:after{inset:38px;border-color:#7d2f2f}.core b{font-size:24px;letter-spacing:.2em}.status{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid var(--line);border-radius:999px;font-size:11px;color:var(--muted)}.dot{width:8px;height:8px;border-radius:50%;background:var(--green)}.command{display:flex;gap:8px;margin-top:16px}.command input{flex:1;min-width:0;background:#0c0e10;color:var(--text);border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-size:15px}.btn{padding:11px 14px;text-align:center}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.card{padding:16px}.card h3{font-size:14px;margin:0 0 12px}.metric{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:9px 0;font-size:12px}.metric:last-child{border-bottom:0}.pipeline{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px}.step{border:1px solid var(--line);border-radius:12px;padding:10px;background:#0e1012;font-size:11px}.step.active{border-color:var(--red);background:rgba(212,71,71,.09)}.logs{height:190px;overflow:auto;background:#08090a;border:1px solid var(--line);border-radius:12px;padding:12px;font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:#9ea7b0}.right{display:grid;gap:14px;align-content:start}.tools{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tool{padding:12px;border:1px solid var(--line);border-radius:12px;background:#0d0f11;cursor:pointer;font-size:12px}.tool:hover{border-color:#555d64}.answer{min-height:140px;white-space:pre-wrap;font-size:13px;line-height:1.7;color:#cfd6dc}.hidden{display:none}@media(max-width:960px){.app{grid-template-columns:1fr}.hero{grid-template-columns:1fr}.side,.right{order:2}.pipeline{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="panel side">
+  <div class="brand"><div class="tiny">RDK X5 · OPENCLAW · 550W</div><h1>MOSS</h1><div class="tiny">HUMAN CIVILIZATION SUPPORT SYSTEM</div></div>
+  <div class="nav">
+    <button class="active">中央控制台</button><button>任务中心</button><button>视觉系统</button><button>语音系统</button><button>硬件控制</button><button>记忆 / SOUL</button>
+  </div>
+</aside>
+<main class="center">
+  <section class="panel hero">
+    <div><div class="core"><b>MOSS</b></div><div style="text-align:center;margin-top:10px"><span class="status"><span class="dot"></span><span id="wsState">WebSocket connecting</span></span></div></div>
+    <div>
+      <div class="tiny">OPENCLAW AGENT COMMAND CHANNEL</div>
+      <h2 style="margin:7px 0 0;font-size:22px">MOSS 中央智能体控制台</h2>
+      <p style="color:var(--muted);font-size:13px;line-height:1.7">通过 Web 控制台直接向 OpenClaw Agent 下达任务，并实时观察智能体、视觉与硬件执行事件。</p>
+      <form id="chatForm" class="command"><input id="message" value="MOSS，分析当前系统状态并给出下一步建议"/><button class="btn primary" type="submit">发送任务</button></form>
+      <div class="pipeline">
+        <div class="step" data-e="agent.thinking">01 意图理解</div><div class="step" data-e="agent.reply">02 OpenClaw</div><div class="step" data-e="camera.capture.started">03 工具调用</div><div class="step" data-e="hardware.servo.completed">04 物理执行</div>
+      </div>
+    </div>
+  </section>
+  <div class="grid2">
+    <section class="panel card"><h3>系统状态</h3><div class="metric"><span>运行模式</span><b id="mode">-</b></div><div class="metric"><span>Agent</span><b id="agent">-</b></div><div class="metric"><span>Camera</span><b id="camera">-</b></div><div class="metric"><span>Voice</span><b id="voice">-</b></div><div class="metric"><span>Hardware</span><b id="hardware">-</b></div></section>
+    <section class="panel card"><h3>MOSS 回复</h3><div class="answer" id="answer">等待任务……</div></section>
+  </div>
+  <section class="panel card"><h3>实时事件日志</h3><div class="logs" id="logs"></div></section>
+</main>
+<aside class="right">
+  <section class="panel card"><div class="tiny">PHYSICAL TOOLS</div><h3 style="margin-top:8px">感知 / 执行控制</h3><div class="tools"><button class="tool" id="snapshot">摄像头快照</button><button class="tool" id="dance">执行舞蹈</button><button class="tool" id="idle">闲时动作</button><button class="tool" id="health">刷新状态</button></div></section>
+  <section class="panel card"><div class="tiny">ARCHITECTURE</div><h3 style="margin-top:8px">当前链路</h3><div style="font-size:12px;line-height:1.9;color:var(--muted)">Web Console<br>↓ FastAPI<br>↓ WebSocket Event Bus<br>↓ OpenClaw Agent<br>↓ RDK Scripts<br>↓ Camera / Servo / Voice</div></section>
+</aside>
+</div>
+<script>
+const $=s=>document.querySelector(s); const logs=$('#logs');
+function log(t){const d=document.createElement('div');d.textContent='['+new Date().toLocaleTimeString()+'] '+t;logs.appendChild(d);logs.scrollTop=logs.scrollHeight}
+function paint(event){document.querySelectorAll('.step').forEach(x=>x.classList.toggle('active',x.dataset.e===event))}
+async function refresh(){const r=await fetch('/api/health');const j=await r.json();const s=j.state;['mode','agent','camera','voice','hardware'].forEach(k=>$('#'+k).textContent=s[k]);}
+const ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+ws.onopen=()=>{$('#wsState').textContent='WebSocket online';log('websocket connected')};
+ws.onclose=()=>{$('#wsState').textContent='WebSocket offline';log('websocket disconnected')};
+ws.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch{return}log(m.event+' '+JSON.stringify(m.payload||{}));paint(m.event);if(m.event==='system.state'){const s=m.payload;['mode','agent','camera','voice','hardware'].forEach(k=>$('#'+k).textContent=s[k]||'-')}if(m.event==='agent.reply')$('#answer').textContent=m.payload.reply||''};
+$('#chatForm').addEventListener('submit',async e=>{e.preventDefault();const message=$('#message').value.trim();if(!message)return;$('#answer').textContent='MOSS 正在处理……';const r=await fetch('/api/agent/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});const j=await r.json();if(!j.ok)$('#answer').textContent='执行失败：'+(j.error||'unknown error')});
+$('#snapshot').onclick=()=>fetch('/api/camera/snapshot',{method:'POST'}).then(r=>r.json()).then(j=>log('snapshot '+JSON.stringify(j)));
+$('#dance').onclick=()=>fetch('/api/hardware/servo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'dance'})}).then(r=>r.json()).then(j=>log('dance '+JSON.stringify(j)));
+$('#idle').onclick=()=>fetch('/api/hardware/servo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'idle'})}).then(r=>r.json()).then(j=>log('idle '+JSON.stringify(j)));
+$('#health').onclick=refresh;refresh();
+</script>
+</body>
+</html>
